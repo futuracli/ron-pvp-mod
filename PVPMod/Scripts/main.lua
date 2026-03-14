@@ -463,20 +463,25 @@ local function CheckRoundEnd()
 
         if PVP.scores[winner] >= CONFIG.ROUNDS_TO_WIN then
             Toast(string.format("TEAM %s GEWINNT DAS MATCH!", string.upper(winner)))
-            -- Match reset nach 8 Sekunden
+            Toast("Neues Match in 8 Sekunden...")
+            Log(">> Auto-Restart: Match Ende, 8 Sek...")
             ExecuteWithDelay(8000, function()
-                PVP.scores = { Blue = 0, Red = 0 }
-                PVP.currentRound = 0
-                Toast("Neues Match! Naechste Runde in 5 Sek...")
-                ExecuteWithDelay(5000, function()
+                Log(">> Auto-Restart: Match Reset callback!")
+                ExecuteInGameThread(function()
+                    PVP.scores = { Blue = 0, Red = 0 }
+                    PVP.currentRound = 0
+                    PVP.enabled = false
                     PVP_GO()
                 end)
             end)
         else
-            -- Naechste Runde automatisch nach 5 Sekunden
             Toast("Naechste Runde in 5 Sekunden...")
+            Log(">> Auto-Restart: Runde Ende, 5 Sek...")
             ExecuteWithDelay(5000, function()
-                PVP_GO()
+                Log(">> Auto-Restart: Naechste Runde callback!")
+                ExecuteInGameThread(function()
+                    PVP_GO()
+                end)
             end)
         end
     end
