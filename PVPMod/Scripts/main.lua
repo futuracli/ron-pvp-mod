@@ -319,14 +319,15 @@ local function ClearNPCs()
             if npcs then
                 for _, npc in pairs(npcs) do
                     Safe(function()
-                        npc:Kill()
+                        -- Unter die Map teleportieren statt killen (Kill crasht)
+                        npc:K2_SetActorLocation({ X = 0, Y = 0, Z = -50000 }, false, {}, true)
                         removed = removed + 1
                     end)
                 end
             end
         end)
     end
-    Log(string.format("NPCs entfernt: %d", removed))
+    Log(string.format("NPCs weggebeamt: %d", removed))
 end
 
 ------------------------------------------------------------
