@@ -234,6 +234,14 @@ PVP_GO = function()
     PVP.currentRound = PVP.currentRound + 1
     ClearNPCs()
     if PVP.currentRound > 1 then
+        -- Tote Spieler respawnen
+        Safe(function()
+            local gm = FindFirstOf("ReadyOrNotGameMode")
+            if gm and gm:IsValid() then
+                Safe(function() gm:RespawnDeadPlayers() end)
+            end
+        end)
+        -- Health resetten fuer alle
         Safe(function()
             local chars = FindAllOf("PlayerCharacter")
             if chars then for _,c in pairs(chars) do Safe(function() c:ResetHealth() end) end end
