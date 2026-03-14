@@ -622,6 +622,88 @@ local function SetupWatcher()
 end
 
 ------------------------------------------------------------
+-- UE WIDGET MENU (echtes In-Game Menu)
+-- Erstellt ein UE UserWidget und zeigt es im Viewport
+------------------------------------------------------------
+
+local PVP_WIDGET = nil
+
+local function CreatePVPWidget()
+    if PVP_WIDGET then return PVP_WIDGET end
+
+    Safe(function()
+        ExecuteInGameThread(function()
+            Safe(function()
+                local pc = FindFirstOf("ReadyOrNotPlayerController")
+                if not pc or not pc:IsValid() then
+                    Debug("Kein PlayerController fuer Widget")
+                    return
+                end
+
+                -- Versuche CreateWidgetForPlayer mit bekanntem Widget
+                -- Das Spiel hat eine Widget-Registry
+                local widget = nil
+                Safe(function()
+                    widget = pc:CreateWidgetForPlayer("W_PVP_RoundEnd", false, false)
+                end)
+
+                if widget and widget:IsValid() then
+                    PVP_WIDGET = widget
+                    Log("Widget erstellt: W_PVP_RoundEnd")
+                else
+                    -- Fallback: StaticConstructObject fuer UserWidget
+                    Safe(function()
+                        local widgetClass = StaticFindObject("/Script/UMG.UserWidget")
+                        if widgetClass then
+                            widget = StaticConstructObject(widgetClass, pc, FName("PVPMenuWidget"))
+                            if widget and widget:IsValid() then
+                                PVP_WIDGET = widget
+                                Log("Widget erstellt via StaticConstructObject")
+                            end
+                        end
+                    end)
+                end
+            end)
+        end)
+    end)
+
+    return PVP_WIDGET
+end
+
+local function ShowWidget()
+    Safe(function()
+        ExecuteInGameThread(function()
+            Safe(function()
+                if PVP_WIDGET and PVP_WIDGET:IsValid() then
+                    PVP_WIDGET:AddToViewport(100)
+                    Log("Widget sichtbar")
+                else
+                    CreatePVPWidget()
+                    if PVP_WIDGET and PVP_WIDGET:IsValid() then
+                        PVP_WIDGET:AddToViewport(100)
+                    else
+                        Debug("Widget konnte nicht erstellt werden")
+                    end
+                end
+            end)
+        end)
+    end)
+end
+
+local function HideWidget()
+    Safe(function()
+        ExecuteInGameThread(function()
+            Safe(function()
+                if PVP_WIDGET and PVP_WIDGET:IsValid() then
+                    PVP_WIDGET:RemoveFromParent()
+                    Log("Widget versteckt")
+                end
+            end)
+        end)
+    end)
+end
+
+------------------------------------------------------------
 -- IN-GAME MENU (Insert Taste)
 -- Zeigt Optionen als Toast, Numpad waehlt aus
 ------------------------------------------------------------
@@ -726,13 +808,17 @@ end
 ------------------------------------------------------------
 
 local function SetupHotkeys()
-    -- INSERT: In-Game Menu
+    -- INSERT: In-Game Menu (Widget + Toast Fallback)
     RegisterKeyBind(Key.INSERT, function()
         MENU.open = not MENU.open
         if MENU.open then
             MENU.page = "main"
+            -- Versuche echtes Widget
+            ShowWidget()
+            -- Toast als Fallback/Ergaenzung
             ShowMenuPage()
         else
+            HideWidget()
             Toast("Menu geschlossen")
         end
     end)
