@@ -277,12 +277,22 @@ end
 
 -- Hooks
 local function SetupHooks()
-    -- EIGENBESCHUSS FIX
+    -- EIGENBESCHUSS FIX (Pre + Post Hook)
     Safe(function()
-        RegisterHook("/Script/ReadyOrNot.ReadyOrNotCharacter:IsOnSameTeam", function(self, A, B, Ret)
-            if PVP.enabled and Ret then Ret:set(false) end
+        local pre, post = RegisterHook("/Script/ReadyOrNot.ReadyOrNotCharacter:IsOnSameTeam", function(self)
+            -- Pre-Hook: nichts tun
         end)
-        Log("Hook: IsOnSameTeam -> false")
+        Log("Hook: IsOnSameTeam pre=" .. tostring(pre) .. " post=" .. tostring(post))
+    end)
+    -- Nochmal als einzelner Hook mit Return-Value Override
+    Safe(function()
+        RegisterHook("/Script/ReadyOrNot.ReadyOrNotCharacter:IsOnSameTeam", function(self, A, B, ReturnValue)
+            if PVP.enabled and ReturnValue then
+                ReturnValue:set(false)
+                Log("IsOnSameTeam -> false gesetzt!")
+            end
+        end)
+        Log("Hook: IsOnSameTeam override")
     end)
     Safe(function()
         RegisterHook("/Script/ReadyOrNot.BpGameplayHelperLib:IsFriendly", function(self, GS, T1, T2, Ret)
