@@ -58,15 +58,29 @@ end
 -- TOAST - In-Game Nachrichten ueber das Spiel-HUD
 ------------------------------------------------------------
 
+-- Findet das aktive HUD Widget (Blueprint-Klasse)
+local function FindHUD()
+    local hud = nil
+    -- Versuche Blueprint-Klasse zuerst, dann C++ Klasse
+    pcall(function() hud = FindFirstOf("W_HumanCharacter_HUD_V2_C") end)
+    if not hud then
+        pcall(function() hud = FindFirstOf("HumanCharacterHUD_V2") end)
+    end
+    return hud
+end
+
 local function Toast(msg)
     local text = tostring(msg)
     Log(text)
     pcall(function()
         ExecuteInGameThread(function()
             pcall(function()
-                local hud = FindFirstOf("HumanCharacterHUD_V2")
+                local hud = FindHUD()
                 if hud and hud:IsValid() then
                     hud:AddToast(text)
+                    Debug("Toast gesendet: " .. text)
+                else
+                    Debug("HUD nicht gefunden fuer Toast")
                 end
             end)
         end)
@@ -77,7 +91,7 @@ local function ScorePopup(msg)
     pcall(function()
         ExecuteInGameThread(function()
             pcall(function()
-                local hud = FindFirstOf("HumanCharacterHUD_V2")
+                local hud = FindHUD()
                 if hud and hud:IsValid() then
                     hud:AddScorePopup(FText(tostring(msg)))
                 end
