@@ -1,11 +1,10 @@
 --[[
-    PVP MOD v5.0 for Ready or Not
+    PVP MOD v6.0 for Ready or Not
 
-    F5 = PVP Starten / Naechste Runde
-    F6 = Scoreboard
-    F7 = PVP Stoppen
-    F8 = NPCs entfernen
-    F9 = Schaden aendern (1x/2x/5x/10x)
+    INSERT     = Menu oeffnen/schliessen
+    Numpad 1-9 = Menu Auswahl
+    F5         = Quick Start / Naechste Runde
+    F6         = Scoreboard
 --]]
 
 ------------------------------------------------------------
@@ -19,7 +18,6 @@ local CONFIG = {
     DAMAGE_MULTIPLIER = 1.0,
     DAMAGE_OPTIONS = { 1.0, 2.0, 5.0, 10.0 },
     DAMAGE_INDEX = 1,
-    DEBUG = true,
 }
 
 ------------------------------------------------------------
@@ -36,38 +34,28 @@ local PVP = {
     teamSpawns = { Blue = nil, Red = nil },
 }
 
+local MENU = { open = false, page = "main" }
+
 ------------------------------------------------------------
 -- LOGGING
 ------------------------------------------------------------
 
-local function Log(msg)
-    print(string.format("[PVP] %s\n", tostring(msg)))
-end
-
-local function Debug(msg)
-    if CONFIG.DEBUG then
-        print(string.format("[PVP-DBG] %s\n", tostring(msg)))
-    end
-end
+local function Log(msg) print(string.format("[PVP] %s\n", tostring(msg))) end
 
 local function Safe(fn)
     local ok, err = pcall(fn)
-    if not ok and CONFIG.DEBUG then
-        print(string.format("[PVP-ERR] %s\n", tostring(err)))
-    end
+    if not ok then print(string.format("[PVP-ERR] %s\n", tostring(err))) end
     return ok
 end
 
 ------------------------------------------------------------
--- TOAST - In-Game Nachrichten
+-- TOAST
 ------------------------------------------------------------
 
 local function FindAllHUDs()
     local huds = nil
     pcall(function() huds = FindAllOf("W_HumanCharacter_HUD_V2_C") end)
-    if not huds then
-        pcall(function() huds = FindAllOf("HumanCharacterHUD_V2") end)
-    end
+    if not huds then pcall(function() huds = FindAllOf("HumanCharacterHUD_V2") end) end
     return huds
 end
 
@@ -80,9 +68,7 @@ local function Toast(msg)
                 local huds = FindAllHUDs()
                 if huds then
                     for _, hud in pairs(huds) do
-                        pcall(function()
-                            if hud:IsValid() then hud:AddToast(text) end
-                        end)
+                        pcall(function() if hud:IsValid() then hud:AddToast(text) end end)
                     end
                 end
             end)
@@ -97,9 +83,7 @@ local function ScorePopup(msg)
                 local huds = FindAllHUDs()
                 if huds then
                     for _, hud in pairs(huds) do
-                        pcall(function()
-                            if hud:IsValid() then hud:AddScorePopup(FText(tostring(msg))) end
-                        end)
+                        pcall(function() if hud:IsValid() then hud:AddScorePopup(FText(tostring(msg))) end end)
                     end
                 end
             end)
@@ -125,19 +109,17 @@ local function ShuffleTable(tbl)
 end
 
 local function GetDistance(a, b)
-    local dx = a.X - b.X
-    local dy = a.Y - b.Y
-    return math.sqrt(dx*dx + dy*dy)
+    return math.sqrt((a.X-b.X)^2 + (a.Y-b.Y)^2)
 end
 
 ------------------------------------------------------------
--- SPIELER SAMMELN mit Steam-Namen
+-- SPIELER
 ------------------------------------------------------------
 
 local function GetAllPlayers()
     local players = {}
+    local names = {}
 
-    local steamNames = {}
     Safe(function()
         local states = FindAllOf("ReadyOrNotPlayerState")
         if states then
@@ -146,22 +128,20 @@ local function GetAllPlayers()
                     local n = ""
                     Safe(function()
                         local raw = ps.PlayerNamePrivate
-                        if raw then
-                            n = tostring(raw)
-                            if string.find(n, "FString") or string.find(n, "0x") then n = "" end
-                        end
+                        if raw then n = tostring(raw) end
+                        if string.find(n, "FString") or string.find(n, "0x") then n = "" end
                     end)
                     if n == "" or n == "None" then
                         Safe(function()
-                            local result = ps:GetPlayerName()
-                            if result then
-                                local s = tostring(result)
-                                if s ~= "" and s ~= "None" and not string.find(s, "FString") then n = s end
+                            local r = ps:GetPlayerName()
+                            if r then
+                                local s = tostring(r)
+                                if not string.find(s, "FString") then n = s end
                             end
                         end)
                     end
-                    if n == "" or n == "None" then n = "Spieler" .. (#steamNames + 1) end
-                    table.insert(steamNames, n)
+                    if n == "" or n == "None" then n = "Spieler" .. (#names + 1) end
+                    table.insert(names, n)
                 end)
             end
         end
@@ -173,7 +153,7 @@ local function GetAllPlayers()
         if chars then
             for _, char in pairs(chars) do
                 Safe(function()
-                    table.insert(players, { name = steamNames[idx] or ("Spieler" .. idx), char = char })
+                    table.insert(players, { name = names[idx] or ("Spieler"..idx), char = char })
                     idx = idx + 1
                 end)
             end
@@ -184,37 +164,34 @@ local function GetAllPlayers()
 end
 
 ------------------------------------------------------------
--- SPAWN SYSTEM
+-- SPAWNS
 ------------------------------------------------------------
 
 local function CollectSpawnPoints()
     PVP.spawnPoints = {}
-
     local basePos = nil
+
     Safe(function()
         local chars = FindAllOf("PlayerCharacter")
         if chars then
-            for _, char in pairs(chars) do
+            for _, c in pairs(chars) do
                 Safe(function()
-                    local loc = char:K2_GetActorLocation()
-                    if loc then basePos = { X = loc.X, Y = loc.Y, Z = loc.Z } end
+                    local loc = c:K2_GetActorLocation()
+                    if loc then basePos = { X=loc.X, Y=loc.Y, Z=loc.Z } end
                 end)
             end
         end
     end)
-
     if not basePos then return end
 
-    for _, cls in ipairs({ "PlayerStart", "ActorSpawnPoint", "PlayerStart_VIP_Spawn" }) do
+    for _, cls in ipairs({"PlayerStart","ActorSpawnPoint","PlayerStart_VIP_Spawn"}) do
         Safe(function()
             local found = FindAllOf(cls)
             if found then
                 for _, obj in pairs(found) do
                     Safe(function()
                         local loc = obj:K2_GetActorLocation()
-                        if loc then
-                            table.insert(PVP.spawnPoints, { X = loc.X, Y = loc.Y, Z = loc.Z })
-                        end
+                        if loc then table.insert(PVP.spawnPoints, {X=loc.X,Y=loc.Y,Z=loc.Z}) end
                     end)
                 end
             end
@@ -222,263 +199,178 @@ local function CollectSpawnPoints()
     end
 
     if #PVP.spawnPoints == 0 then
-        local range = CONFIG.SPAWN_SCATTER_RANGE
         for i = 1, 12 do
-            local angle = (i / 12) * 2 * math.pi + (math.random() * 0.5)
-            local dist = range * 0.4 + math.random() * range * 0.6
+            local a = (i/12) * 2 * math.pi + math.random() * 0.5
+            local d = CONFIG.SPAWN_SCATTER_RANGE * (0.4 + math.random() * 0.6)
             table.insert(PVP.spawnPoints, {
-                X = basePos.X + math.cos(angle) * dist,
-                Y = basePos.Y + math.sin(angle) * dist,
+                X = basePos.X + math.cos(a)*d,
+                Y = basePos.Y + math.sin(a)*d,
                 Z = basePos.Z
             })
         end
     end
-
     Log(string.format("Spawns: %d", #PVP.spawnPoints))
 end
 
-local function PickTeamSpawnPoints()
+local function PickTeamSpawns()
     if #PVP.spawnPoints < 2 then return end
-    local bestDist, bestA, bestB = 0, 1, 2
+    local best, bA, bB = 0, 1, 2
     for i = 1, #PVP.spawnPoints do
-        for j = i + 1, #PVP.spawnPoints do
-            local dist = GetDistance(PVP.spawnPoints[i], PVP.spawnPoints[j])
-            if dist > bestDist then bestDist = dist; bestA = i; bestB = j end
+        for j = i+1, #PVP.spawnPoints do
+            local d = GetDistance(PVP.spawnPoints[i], PVP.spawnPoints[j])
+            if d > best then best=d; bA=i; bB=j end
         end
     end
-    PVP.teamSpawns.Blue = PVP.spawnPoints[bestA]
-    PVP.teamSpawns.Red = PVP.spawnPoints[bestB]
+    PVP.teamSpawns.Blue = PVP.spawnPoints[bA]
+    PVP.teamSpawns.Red = PVP.spawnPoints[bB]
 end
 
 local function TeleportPlayer(char, team)
-    local base = (team == "Blue") and PVP.teamSpawns.Blue or PVP.teamSpawns.Red
+    local base = (team=="Blue") and PVP.teamSpawns.Blue or PVP.teamSpawns.Red
     if not base then base = RandomElement(PVP.spawnPoints) end
     if not base then return false end
-
     local ok = false
     Safe(function()
         local r = CONFIG.TEAM_SPAWN_RADIUS
         local a = math.random() * 2 * math.pi
         local d = math.random() * r
-        char:K2_SetActorLocation({
-            X = base.X + math.cos(a) * d,
-            Y = base.Y + math.sin(a) * d,
-            Z = base.Z
-        }, false, {}, true)
-        char:K2_SetActorRotation({ Pitch = 0, Yaw = math.random(0, 360), Roll = 0 }, true)
+        char:K2_SetActorLocation({X=base.X+math.cos(a)*d, Y=base.Y+math.sin(a)*d, Z=base.Z}, false, {}, true)
+        char:K2_SetActorRotation({Pitch=0, Yaw=math.random(0,360), Roll=0}, true)
         ok = true
     end)
     return ok
 end
 
 ------------------------------------------------------------
--- NPCs ENTFERNEN
+-- NPCs / FRIENDLY FIRE / TEAMS
 ------------------------------------------------------------
 
 local function ClearNPCs()
-    local removed = 0
-    for _, cls in ipairs({ "CyberneticCharacter", "CivilianCharacter" }) do
+    local n = 0
+    for _, cls in ipairs({"CyberneticCharacter","CivilianCharacter"}) do
         Safe(function()
             local npcs = FindAllOf(cls)
-            if npcs then
-                for _, npc in pairs(npcs) do
-                    Safe(function()
-                        npc:K2_SetActorLocation({ X = 0, Y = 0, Z = -50000 }, false, {}, true)
-                        removed = removed + 1
-                    end)
-                end
-            end
+            if npcs then for _, npc in pairs(npcs) do
+                Safe(function() npc:K2_SetActorLocation({X=0,Y=0,Z=-50000}, false, {}, true); n=n+1 end)
+            end end
         end)
     end
-    Log(string.format("NPCs weggebeamt: %d", removed))
+    Log(string.format("NPCs weg: %d", n))
 end
 
-------------------------------------------------------------
--- FRIENDLY FIRE
-------------------------------------------------------------
-
-local function SetFriendlyFire(enabled)
+local function SetFriendlyFire(on)
     Safe(function()
         local chars = FindAllOf("ReadyOrNotCharacter")
-        if chars then
-            for _, char in pairs(chars) do
-                Safe(function() char.bNoTeamDamage = not enabled end)
-            end
-        end
+        if chars then for _, c in pairs(chars) do
+            Safe(function() c.bNoTeamDamage = not on end)
+        end end
     end)
 end
 
-------------------------------------------------------------
--- TEAMS
--- ETeamType: 0=NONE, 1=SERT_RED, 2=SERT_BLUE
-------------------------------------------------------------
-
-local function ApplyTeam(playerChar, team)
-    local enumVal = (team == "Blue") and 2 or 1
-    Safe(function() playerChar.DefaultTeam = enumVal end)
-    Safe(function() playerChar:HandleTeamChanged(enumVal) end)
+local function ApplyTeam(char, team)
+    local v = (team=="Blue") and 2 or 1
+    Safe(function() char.DefaultTeam = v end)
+    Safe(function() char:HandleTeamChanged(v) end)
 end
+
+local function GetTeam(name) return PVP.teams[name] or "Blue" end
 
 local function AutoAssignTeams()
     PVP.teams = {}
-    local players = GetAllPlayers()
-    players = ShuffleTable(players)
-
+    local players = ShuffleTable(GetAllPlayers())
     for i, p in ipairs(players) do
-        local team = (i % 2 == 1) and "Blue" or "Red"
-        PVP.teams[p.name] = team
-        ApplyTeam(p.char, team)
-        Log(string.format("  %s -> %s", p.name, team))
+        local t = (i%2==1) and "Blue" or "Red"
+        PVP.teams[p.name] = t
+        ApplyTeam(p.char, t)
+        Log(string.format("  %s -> %s", p.name, t))
     end
-
-    local b, r = 0, 0
-    for _, t in pairs(PVP.teams) do
-        if t == "Blue" then b = b + 1 elseif t == "Red" then r = r + 1 end
-    end
+    local b,r = 0,0
+    for _,t in pairs(PVP.teams) do if t=="Blue" then b=b+1 else r=r+1 end end
     Toast(string.format("Teams: BLUE %d vs RED %d", b, r))
-end
-
-local function GetTeam(name)
-    return PVP.teams[name] or "Blue"
-end
-
-------------------------------------------------------------
--- RESPAWN
-------------------------------------------------------------
-
-local function RespawnPlayers()
-    Safe(function()
-        local chars = FindAllOf("PlayerCharacter")
-        if chars then
-            for _, char in pairs(chars) do
-                Safe(function() char:ResetHealth() end)
-            end
-        end
-    end)
 end
 
 ------------------------------------------------------------
 -- RUNDEN
 ------------------------------------------------------------
 
--- Forward declaration
-local PVP_GO
+local PVP_GO -- forward declaration
 
 local function CheckRoundEnd()
     if not PVP.roundActive then return end
-
     local players = GetAllPlayers()
     if #players == 0 then return end
 
-    local aliveBlue, aliveRed = 0, 0
+    local aB, aR = 0, 0
     for _, p in ipairs(players) do
         local dead = false
         Safe(function() dead = p.char:IsDeadOrUnconscious() end)
         if not dead then
-            local t = GetTeam(p.name)
-            if t == "Blue" then aliveBlue = aliveBlue + 1
-            elseif t == "Red" then aliveRed = aliveRed + 1 end
+            if GetTeam(p.name)=="Blue" then aB=aB+1 else aR=aR+1 end
         end
     end
 
-    Debug(string.format("Alive: B=%d R=%d", aliveBlue, aliveRed))
-
     local winner = nil
-    if aliveBlue == 0 and aliveRed > 0 then winner = "Red"
-    elseif aliveRed == 0 and aliveBlue > 0 then winner = "Blue" end
+    if aB==0 and aR>0 then winner="Red"
+    elseif aR==0 and aB>0 then winner="Blue" end
 
     if winner then
         PVP.roundActive = false
         PVP.scores[winner] = PVP.scores[winner] + 1
-        Toast(string.format("TEAM %s GEWINNT RUNDE %d!", string.upper(winner), PVP.currentRound))
+        Toast(string.format("TEAM %s GEWINNT RUNDE %d!", winner:upper(), PVP.currentRound))
         ScorePopup(string.format("BLUE %d - %d RED", PVP.scores.Blue, PVP.scores.Red))
 
         if PVP.scores[winner] >= CONFIG.ROUNDS_TO_WIN then
-            Toast(string.format("TEAM %s GEWINNT DAS MATCH!", string.upper(winner)))
-            Toast("Neues Match in 8 Sekunden...")
-            Log(">> Auto-Restart: Match Ende")
+            Toast(string.format("TEAM %s GEWINNT DAS MATCH!", winner:upper()))
+            Toast("Neues Match in 8 Sek...")
             ExecuteWithDelay(8000, function()
-                Log(">> Auto-Restart: Match Reset!")
                 ExecuteInGameThread(function()
-                    PVP.scores = { Blue = 0, Red = 0 }
-                    PVP.currentRound = 0
-                    PVP.enabled = false
+                    PVP.scores = {Blue=0,Red=0}; PVP.currentRound = 0; PVP.enabled = false
                     PVP_GO()
                 end)
             end)
         else
-            Toast("Naechste Runde in 5 Sekunden...")
-            Log(">> Auto-Restart: Naechste Runde in 5s")
+            Toast("Naechste Runde in 5 Sek...")
             ExecuteWithDelay(5000, function()
-                Log(">> Auto-Restart: Runde startet!")
-                ExecuteInGameThread(function()
-                    PVP_GO()
-                end)
+                ExecuteInGameThread(function() PVP_GO() end)
             end)
         end
     end
 end
 
-------------------------------------------------------------
--- HAUPTFUNKTION
-------------------------------------------------------------
-
 PVP_GO = function()
     if not PVP.enabled then
-        PVP.enabled = true
-        PVP.currentRound = 0
-        PVP.roundActive = false
-        PVP.scores = { Blue = 0, Red = 0 }
-        CollectSpawnPoints()
-        AutoAssignTeams()
-        Log("=== NEUES PVP MATCH ===")
+        PVP.enabled = true; PVP.currentRound = 0; PVP.roundActive = false
+        PVP.scores = {Blue=0,Red=0}
+        CollectSpawnPoints(); AutoAssignTeams()
+        Log("=== NEUES MATCH ===")
     end
 
-    if PVP.roundActive then
-        Toast("Runde laeuft noch!")
-        return
-    end
+    if PVP.roundActive then Toast("Runde laeuft!"); return end
 
-    -- Match vorbei? Reset
     if PVP.scores.Blue >= CONFIG.ROUNDS_TO_WIN or PVP.scores.Red >= CONFIG.ROUNDS_TO_WIN then
-        PVP.currentRound = 0
-        PVP.scores = { Blue = 0, Red = 0 }
-        AutoAssignTeams()
-        Log("=== NEUES MATCH (Reset) ===")
+        PVP.currentRound = 0; PVP.scores = {Blue=0,Red=0}; AutoAssignTeams()
     end
 
-    -- RUNDE STARTEN
     PVP.currentRound = PVP.currentRound + 1
-
-    -- 1) NPCs weg (VOR roundActive)
     ClearNPCs()
-
-    -- 2) Health reset (ab Runde 2)
     if PVP.currentRound > 1 then
-        RespawnPlayers()
+        Safe(function()
+            local chars = FindAllOf("PlayerCharacter")
+            if chars then for _,c in pairs(chars) do Safe(function() c:ResetHealth() end) end end
+        end)
     end
 
-    -- Jetzt Runde aktivieren
     PVP.roundActive = true
-
-    -- 3) Teams setzen
     local players = GetAllPlayers()
-    for _, p in ipairs(players) do
-        ApplyTeam(p.char, GetTeam(p.name))
-    end
-
-    -- 4) Friendly Fire
+    for _, p in ipairs(players) do ApplyTeam(p.char, GetTeam(p.name)) end
     SetFriendlyFire(true)
 
-    -- 5) Teleport
-    PickTeamSpawnPoints()
+    PickTeamSpawns()
     local count = 0
     for _, p in ipairs(players) do
-        local team = GetTeam(p.name)
-        if TeleportPlayer(p.char, team) then count = count + 1 end
+        if TeleportPlayer(p.char, GetTeam(p.name)) then count=count+1 end
     end
 
-    Log(string.format("Runde %d | %d Spieler teleportiert", PVP.currentRound, count))
     Toast(string.format("RUNDE %d - FIGHT!", PVP.currentRound))
     ScorePopup(string.format("BLUE %d - %d RED", PVP.scores.Blue, PVP.scores.Red))
 end
@@ -491,34 +383,124 @@ local function ShowScoreboard()
     Log("========== SCOREBOARD ==========")
     Log(string.format("Runde %d/%d | BLUE %d - %d RED",
         PVP.currentRound, CONFIG.ROUNDS_TO_WIN, PVP.scores.Blue, PVP.scores.Red))
-
     local players = GetAllPlayers()
     for _, p in ipairs(players) do
-        local team = GetTeam(p.name)
         local dead = false
         Safe(function() dead = p.char:IsDeadOrUnconscious() end)
-        Log(string.format("  [%s] %s %s", team, p.name, dead and "- TOT" or "- LEBT"))
+        Log(string.format("  [%s] %s %s", GetTeam(p.name), p.name, dead and "TOT" or "LEBT"))
     end
-
     Safe(function()
         local states = FindAllOf("ReadyOrNotPlayerState")
-        if states then
-            for _, ps in pairs(states) do
-                Safe(function()
-                    local n = "?"
-                    Safe(function() n = tostring(ps.PlayerNamePrivate) end)
-                    if n == "" or n == "None" or string.find(n, "FString") then n = "?" end
-                    local k, d = 0, 0
-                    Safe(function() k = ps.Kills end)
-                    Safe(function() d = ps.Deaths end)
-                    Log(string.format("  %s: K:%d D:%d", n, k, d))
-                end)
-            end
-        end
+        if states then for _, ps in pairs(states) do Safe(function()
+            local n = "?"
+            Safe(function() n = tostring(ps.PlayerNamePrivate) end)
+            if n=="" or n=="None" or string.find(n,"FString") then n="?" end
+            local k,d = 0,0
+            Safe(function() k = ps.Kills end)
+            Safe(function() d = ps.Deaths end)
+            Log(string.format("  %s: K:%d D:%d", n, k, d))
+        end) end end
     end)
-
     Toast(string.format("BLUE %d - %d RED | Runde %d", PVP.scores.Blue, PVP.scores.Red, PVP.currentRound))
     Log("================================")
+end
+
+------------------------------------------------------------
+-- MENU (Insert + Numpad, alles ueber Toast)
+------------------------------------------------------------
+
+local function ShowMenu()
+    if MENU.page == "main" then
+        Toast("===== PVP MENU =====")
+        Toast(string.format("[%s] Runde %d/%d | BLUE %d - RED %d | DMG %.0fx",
+            PVP.enabled and "AN" or "AUS", PVP.currentRound, CONFIG.ROUNDS_TO_WIN,
+            PVP.scores.Blue, PVP.scores.Red, CONFIG.DAMAGE_MULTIPLIER))
+        Toast("[1] Start/Runde  [2] Stop")
+        Toast("[3] Teams  [4] Runden  [5] Schaden")
+        Toast("[6] NPCs weg  [7] Score  [0] Schliessen")
+    elseif MENU.page == "teams" then
+        Toast("===== TEAMS =====")
+        local players = GetAllPlayers()
+        for i, p in ipairs(players) do
+            Toast(string.format("  %d. %s [%s]", i, p.name, GetTeam(p.name)))
+        end
+        Toast("[1] Auto  [2] Tauschen")
+        Toast("[3] Sp.1 switch  [4] Sp.2 switch")
+        Toast("[5] Sp.3 switch  [6] Sp.4 switch")
+        Toast("[0] Zurueck")
+    elseif MENU.page == "rounds" then
+        Toast(string.format("===== RUNDEN: %d =====", CONFIG.ROUNDS_TO_WIN))
+        Toast("[1] 3  [2] 5  [3] 7  [4] 10")
+        Toast("[0] Zurueck")
+    elseif MENU.page == "damage" then
+        Toast(string.format("===== SCHADEN: %.0fx =====", CONFIG.DAMAGE_MULTIPLIER))
+        Toast("[1] 1x  [2] 2x  [3] 5x  [4] 10x")
+        Toast("[0] Zurueck")
+    end
+end
+
+local function MenuInput(key)
+    if not MENU.open then return end
+
+    -- 0 = Zurueck/Schliessen
+    if key == 0 then
+        if MENU.page == "main" then
+            MENU.open = false; Toast("Menu zu")
+        else
+            MENU.page = "main"; ShowMenu()
+        end
+        return
+    end
+
+    if MENU.page == "main" then
+        if key==1 then PVP_GO(); MENU.open = false
+        elseif key==2 then
+            PVP.enabled=false; PVP.roundActive=false; SetFriendlyFire(false)
+            Toast("PVP GESTOPPT"); MENU.open = false
+        elseif key==3 then MENU.page="teams"; ShowMenu()
+        elseif key==4 then MENU.page="rounds"; ShowMenu()
+        elseif key==5 then MENU.page="damage"; ShowMenu()
+        elseif key==6 then ClearNPCs(); Toast("NPCs weg!")
+        elseif key==7 then ShowScoreboard()
+        end
+
+    elseif MENU.page == "teams" then
+        if key==1 then AutoAssignTeams(); ShowMenu()
+        elseif key==2 then
+            for name, team in pairs(PVP.teams) do
+                PVP.teams[name] = (team=="Blue") and "Red" or "Blue"
+            end
+            local players = GetAllPlayers()
+            for _, p in ipairs(players) do ApplyTeam(p.char, GetTeam(p.name)) end
+            Toast("Teams getauscht!"); ShowMenu()
+        elseif key>=3 and key<=6 then
+            local idx = key - 2
+            local players = GetAllPlayers()
+            if idx <= #players then
+                local p = players[idx]
+                PVP.teams[p.name] = (GetTeam(p.name)=="Blue") and "Red" or "Blue"
+                ApplyTeam(p.char, PVP.teams[p.name])
+                Toast(p.name .. " -> " .. PVP.teams[p.name])
+            else
+                Toast("Spieler "..idx.." nicht da")
+            end
+            ShowMenu()
+        end
+
+    elseif MENU.page == "rounds" then
+        local opts = {3, 5, 7, 10}
+        if key >= 1 and key <= 4 then
+            CONFIG.ROUNDS_TO_WIN = opts[key]
+            Toast("Runden: " .. opts[key]); ShowMenu()
+        end
+
+    elseif MENU.page == "damage" then
+        local opts = {1.0, 2.0, 5.0, 10.0}
+        if key >= 1 and key <= 4 then
+            CONFIG.DAMAGE_MULTIPLIER = opts[key]
+            Toast(string.format("Schaden: %.0fx", opts[key])); ShowMenu()
+        end
+    end
 end
 
 ------------------------------------------------------------
@@ -526,78 +508,64 @@ end
 ------------------------------------------------------------
 
 local function SetupHooks()
-    -- EIGENBESCHUSS FIX: IsOnSameTeam(A, B) -> bool
-    -- Parameter: self, A, B, ReturnValue (ReturnValue ist der LETZTE param)
+    -- Eigenbeschuss Fix: IsOnSameTeam(A, B) -> false
     Safe(function()
         RegisterHook("/Script/ReadyOrNot.ReadyOrNotCharacter:IsOnSameTeam", function(self, A, B, ReturnValue)
             if not PVP.enabled then return end
             if ReturnValue then ReturnValue:set(false) end
         end)
-        Log("Hook: IsOnSameTeam(A,B) -> false")
+        Log("Hook: IsOnSameTeam -> false")
     end)
 
-    -- IsFriendly(GameState, TeamOne, TeamTwo) -> bool
     Safe(function()
-        RegisterHook("/Script/ReadyOrNot.BpGameplayHelperLib:IsFriendly", function(self, GameState, TeamOne, TeamTwo, ReturnValue)
+        RegisterHook("/Script/ReadyOrNot.BpGameplayHelperLib:IsFriendly", function(self, GS, T1, T2, Ret)
             if not PVP.enabled then return end
-            if ReturnValue then ReturnValue:set(false) end
+            if Ret then Ret:set(false) end
         end)
         Log("Hook: IsFriendly -> false")
     end)
 
-    -- IsFriendlyWithMe(GameState, TeamType) -> bool
     Safe(function()
-        RegisterHook("/Script/ReadyOrNot.BpGameplayHelperLib:IsFriendlyWithMe", function(self, GameState, TeamType, ReturnValue)
+        RegisterHook("/Script/ReadyOrNot.BpGameplayHelperLib:IsFriendlyWithMe", function(self, GS, T, Ret)
             if not PVP.enabled then return end
-            if ReturnValue then ReturnValue:set(false) end
+            if Ret then Ret:set(false) end
         end)
         Log("Hook: IsFriendlyWithMe -> false")
     end)
 
-    -- PlayerKilled
+    -- Kill Detection
     Safe(function()
         RegisterHook("/Script/ReadyOrNot.ReadyOrNotGameMode:PlayerKilled", function(self)
             if not PVP.enabled then return end
-            Log(">> Spieler getoetet!")
             Toast("Spieler eliminiert!")
             CheckRoundEnd()
         end)
         Log("Hook: PlayerKilled")
     end)
 
-    -- Damage Multiplier: Extra Schaden bei TakeDamage
+    -- Damage Multiplier
     Safe(function()
         RegisterHook("/Script/ReadyOrNot.ReadyOrNotCharacter:Multicast_TakeDamage", function(self)
-            if not PVP.enabled then return end
-            if CONFIG.DAMAGE_MULTIPLIER > 1.0 then
-                Safe(function()
-                    local char = self:get()
-                    if char and char:IsValid() then
-                        -- Bei 2x: 1 extra hit, bei 5x: 4 extra, bei 10x: 9 extra
-                        local extraHits = math.floor(CONFIG.DAMAGE_MULTIPLIER) - 1
-                        for i = 1, extraHits do
-                            Safe(function()
-                                -- Kopf-Schaden simulieren fuer schnelleren Kill
-                                local healthComps = FindAllOf("CharacterHealthComponent")
-                                if healthComps then
-                                    for _, hc in pairs(healthComps) do
-                                        Safe(function()
-                                            -- DecreaseLimbHealth(Limb, Amount)
-                                            -- Limb 0 = Head
-                                            hc:DecreaseLimbHealth(0, 10.0)
-                                        end)
-                                    end
-                                end
-                            end)
-                        end
+            if not PVP.enabled or CONFIG.DAMAGE_MULTIPLIER <= 1.0 then return end
+            Safe(function()
+                local char = self:get()
+                if char and char:IsValid() then
+                    local extra = math.floor(CONFIG.DAMAGE_MULTIPLIER) - 1
+                    for i = 1, extra do
+                        Safe(function()
+                            local comps = FindAllOf("CharacterHealthComponent")
+                            if comps then for _, hc in pairs(comps) do
+                                Safe(function() hc:DecreaseLimbHealth(0, 10.0) end)
+                            end end
+                        end)
                     end
-                end)
-            end
+                end
+            end)
         end)
-        Log("Hook: TakeDamage (Multiplier)")
+        Log("Hook: Damage Multiplier")
     end)
 
-    -- Spawn Hook
+    -- Spawn: re-apply friendly fire
     Safe(function()
         RegisterHook("/Script/ReadyOrNot.ReadyOrNotGameMode:SpawnPlayerCharacter", function(self)
             if not PVP.enabled then return end
@@ -622,225 +590,36 @@ local function SetupWatcher()
 end
 
 ------------------------------------------------------------
--- UE WIDGET MENU (echtes In-Game Menu)
--- Erstellt ein UE UserWidget und zeigt es im Viewport
-------------------------------------------------------------
-
-local PVP_WIDGET = nil
-
-local function CreatePVPWidget()
-    if PVP_WIDGET then return PVP_WIDGET end
-
-    Safe(function()
-        ExecuteInGameThread(function()
-            Safe(function()
-                local pc = FindFirstOf("ReadyOrNotPlayerController")
-                if not pc or not pc:IsValid() then
-                    Debug("Kein PlayerController fuer Widget")
-                    return
-                end
-
-                -- Versuche CreateWidgetForPlayer mit bekanntem Widget
-                -- Das Spiel hat eine Widget-Registry
-                local widget = nil
-                Safe(function()
-                    widget = pc:CreateWidgetForPlayer("W_PVP_RoundEnd", false, false)
-                end)
-
-                if widget and widget:IsValid() then
-                    PVP_WIDGET = widget
-                    Log("Widget erstellt: W_PVP_RoundEnd")
-                else
-                    -- Fallback: StaticConstructObject fuer UserWidget
-                    Safe(function()
-                        local widgetClass = StaticFindObject("/Script/UMG.UserWidget")
-                        if widgetClass then
-                            widget = StaticConstructObject(widgetClass, pc, FName("PVPMenuWidget"))
-                            if widget and widget:IsValid() then
-                                PVP_WIDGET = widget
-                                Log("Widget erstellt via StaticConstructObject")
-                            end
-                        end
-                    end)
-                end
-            end)
-        end)
-    end)
-
-    return PVP_WIDGET
-end
-
-local function ShowWidget()
-    Safe(function()
-        ExecuteInGameThread(function()
-            Safe(function()
-                if PVP_WIDGET and PVP_WIDGET:IsValid() then
-                    PVP_WIDGET:AddToViewport(100)
-                    Log("Widget sichtbar")
-                else
-                    CreatePVPWidget()
-                    if PVP_WIDGET and PVP_WIDGET:IsValid() then
-                        PVP_WIDGET:AddToViewport(100)
-                    else
-                        Debug("Widget konnte nicht erstellt werden")
-                    end
-                end
-            end)
-        end)
-    end)
-end
-
-local function HideWidget()
-    Safe(function()
-        ExecuteInGameThread(function()
-            Safe(function()
-                if PVP_WIDGET and PVP_WIDGET:IsValid() then
-                    PVP_WIDGET:RemoveFromParent()
-                    Log("Widget versteckt")
-                end
-            end)
-        end)
-    end)
-end
-
-------------------------------------------------------------
--- IN-GAME MENU (Insert Taste)
--- Zeigt Optionen als Toast, Numpad waehlt aus
-------------------------------------------------------------
-
-local MENU = {
-    open = false,
-    page = "main",
-}
-
-local function ShowMenuPage()
-    if MENU.page == "main" then
-        Toast("=== PVP MENU ===")
-        Toast(string.format("Status: %s | Runde %d/%d | B%d-R%d",
-            PVP.enabled and "AN" or "AUS", PVP.currentRound, CONFIG.ROUNDS_TO_WIN,
-            PVP.scores.Blue, PVP.scores.Red))
-        Toast("[1] PVP Start/Runde [2] Stop")
-        Toast("[3] Teams [4] Runden [5] Schaden")
-        Toast("[6] NPCs weg [7] Scoreboard")
-        Toast("[Insert] Menu schliessen")
-    elseif MENU.page == "teams" then
-        Toast("=== TEAMS ===")
-        local players = GetAllPlayers()
-        for i, p in ipairs(players) do
-            Toast(string.format("%d. %s -> %s", i, p.name, GetTeam(p.name)))
-        end
-        Toast("[1] Auto-Teams [2] Tauschen")
-        Toast("[3] Sp1 wechseln [4] Sp2 wechseln")
-        Toast("[9] Zurueck")
-    elseif MENU.page == "rounds" then
-        Toast(string.format("=== RUNDEN: %d ===", CONFIG.ROUNDS_TO_WIN))
-        Toast("[1] 3 Runden [2] 5 Runden [3] 7 Runden")
-        Toast("[9] Zurueck")
-    elseif MENU.page == "damage" then
-        Toast(string.format("=== SCHADEN: %.0fx ===", CONFIG.DAMAGE_MULTIPLIER))
-        Toast("[1] 1x [2] 2x [3] 5x [4] 10x")
-        Toast("[9] Zurueck")
-    end
-end
-
-local function HandleMenuInput(key)
-    if not MENU.open then return false end
-
-    if MENU.page == "main" then
-        if key == 1 then PVP_GO(); MENU.open = false
-        elseif key == 2 then
-            PVP.enabled = false; PVP.roundActive = false
-            SetFriendlyFire(false); Toast("PVP GESTOPPT"); MENU.open = false
-        elseif key == 3 then MENU.page = "teams"; ShowMenuPage()
-        elseif key == 4 then MENU.page = "rounds"; ShowMenuPage()
-        elseif key == 5 then MENU.page = "damage"; ShowMenuPage()
-        elseif key == 6 then ClearNPCs(); Toast("NPCs entfernt!")
-        elseif key == 7 then ShowScoreboard()
-        end
-    elseif MENU.page == "teams" then
-        if key == 1 then AutoAssignTeams(); ShowMenuPage()
-        elseif key == 2 then
-            for name, team in pairs(PVP.teams) do
-                PVP.teams[name] = (team == "Blue") and "Red" or "Blue"
-            end
-            Toast("Teams getauscht!")
-            ShowMenuPage()
-        elseif key == 3 then
-            local players = GetAllPlayers()
-            if #players >= 1 then
-                local p = players[1]
-                PVP.teams[p.name] = (GetTeam(p.name) == "Blue") and "Red" or "Blue"
-                ApplyTeam(p.char, PVP.teams[p.name])
-                Toast(p.name .. " -> " .. PVP.teams[p.name])
-            end
-            ShowMenuPage()
-        elseif key == 4 then
-            local players = GetAllPlayers()
-            if #players >= 2 then
-                local p = players[2]
-                PVP.teams[p.name] = (GetTeam(p.name) == "Blue") and "Red" or "Blue"
-                ApplyTeam(p.char, PVP.teams[p.name])
-                Toast(p.name .. " -> " .. PVP.teams[p.name])
-            end
-            ShowMenuPage()
-        elseif key == 9 then MENU.page = "main"; ShowMenuPage()
-        end
-    elseif MENU.page == "rounds" then
-        if key == 1 then CONFIG.ROUNDS_TO_WIN = 3; Toast("Runden: 3")
-        elseif key == 2 then CONFIG.ROUNDS_TO_WIN = 5; Toast("Runden: 5")
-        elseif key == 3 then CONFIG.ROUNDS_TO_WIN = 7; Toast("Runden: 7")
-        elseif key == 9 then MENU.page = "main"; ShowMenuPage()
-        end
-    elseif MENU.page == "damage" then
-        if key == 1 then CONFIG.DAMAGE_MULTIPLIER = 1.0; Toast("Schaden: 1x")
-        elseif key == 2 then CONFIG.DAMAGE_MULTIPLIER = 2.0; Toast("Schaden: 2x")
-        elseif key == 3 then CONFIG.DAMAGE_MULTIPLIER = 5.0; Toast("Schaden: 5x")
-        elseif key == 4 then CONFIG.DAMAGE_MULTIPLIER = 10.0; Toast("Schaden: 10x")
-        elseif key == 9 then MENU.page = "main"; ShowMenuPage()
-        end
-    end
-
-    return true
-end
-
-------------------------------------------------------------
 -- HOTKEYS
 ------------------------------------------------------------
 
 local function SetupHotkeys()
-    -- INSERT: In-Game Menu (Widget + Toast Fallback)
+    -- INSERT: Menu
     RegisterKeyBind(Key.INS, function()
         MENU.open = not MENU.open
-        if MENU.open then
-            MENU.page = "main"
-            -- Versuche echtes Widget
-            ShowWidget()
-            -- Toast als Fallback/Ergaenzung
-            ShowMenuPage()
-        else
-            HideWidget()
-            Toast("Menu geschlossen")
-        end
+        if MENU.open then MENU.page = "main"; ShowMenu()
+        else Toast("Menu zu") end
     end)
 
-    -- F5: Quick Start (auch ohne Menu)
+    -- F5: Quick Start
     RegisterKeyBind(Key.F5, function() PVP_GO() end)
 
     -- F6: Scoreboard
     RegisterKeyBind(Key.F6, function() ShowScoreboard() end)
 
-    -- Numpad 1-9: Menu Input
-    RegisterKeyBind(Key.NUM_ONE, function() HandleMenuInput(1) end)
-    RegisterKeyBind(Key.NUM_TWO, function() HandleMenuInput(2) end)
-    RegisterKeyBind(Key.NUM_THREE, function() HandleMenuInput(3) end)
-    RegisterKeyBind(Key.NUM_FOUR, function() HandleMenuInput(4) end)
-    RegisterKeyBind(Key.NUM_FIVE, function() HandleMenuInput(5) end)
-    RegisterKeyBind(Key.NUM_SIX, function() HandleMenuInput(6) end)
-    RegisterKeyBind(Key.NUM_SEVEN, function() HandleMenuInput(7) end)
-    RegisterKeyBind(Key.NUM_EIGHT, function() HandleMenuInput(8) end)
-    RegisterKeyBind(Key.NUM_NINE, function() HandleMenuInput(9) end)
+    -- Numpad 0-9
+    RegisterKeyBind(Key.NUM_ZERO, function() MenuInput(0) end)
+    RegisterKeyBind(Key.NUM_ONE, function() MenuInput(1) end)
+    RegisterKeyBind(Key.NUM_TWO, function() MenuInput(2) end)
+    RegisterKeyBind(Key.NUM_THREE, function() MenuInput(3) end)
+    RegisterKeyBind(Key.NUM_FOUR, function() MenuInput(4) end)
+    RegisterKeyBind(Key.NUM_FIVE, function() MenuInput(5) end)
+    RegisterKeyBind(Key.NUM_SIX, function() MenuInput(6) end)
+    RegisterKeyBind(Key.NUM_SEVEN, function() MenuInput(7) end)
+    RegisterKeyBind(Key.NUM_EIGHT, function() MenuInput(8) end)
+    RegisterKeyBind(Key.NUM_NINE, function() MenuInput(9) end)
 
-    Log("Hotkeys: INSERT=Menu F5=GO F6=Score Numpad=Input")
+    Log("Keys: INS=Menu F5=Go F6=Score Numpad=Input")
 end
 
 ------------------------------------------------------------
@@ -849,14 +628,13 @@ end
 
 math.randomseed(os.time())
 Log("========================================")
-Log("  PVP MOD v5.1 - Ready or Not")
+Log("  PVP MOD v6.0 - Ready or Not")
 Log("========================================")
 SetupHooks()
 SetupWatcher()
 SetupHotkeys()
 Log("========================================")
-Log("  INSERT = In-Game PVP Menu")
-Log("  F5 = Quick Start / Naechste Runde")
+Log("  INSERT = PVP Menu (im Spiel sichtbar)")
+Log("  F5 = Quick Start")
 Log("  F6 = Scoreboard")
-Log("  Numpad 1-9 = Menu Auswahl")
 Log("========================================")
