@@ -239,25 +239,35 @@ PVP_GO = function()
             local gm = FindFirstOf("ReadyOrNotGameMode")
             if gm and gm:IsValid() then
                 Safe(function() gm:RespawnDeadPlayers() end)
+                Safe(function() gm:RespawnAllPlayers() end)
+                Log("Respawn ausgefuehrt")
             end
         end)
-        -- Health resetten fuer alle
-        Safe(function()
-            local chars = FindAllOf("PlayerCharacter")
-            if chars then for _,c in pairs(chars) do Safe(function() c:ResetHealth() end) end end
-        end)
     end
+
+    -- Kurz warten damit Respawn abgeschlossen ist, dann teleportieren
     PVP.roundActive = true
-    local players = GetAllPlayers()
-    for _, p in ipairs(players) do ApplyTeam(p.char, GetTeam(p.name)) end
-    SetFriendlyFire(true)
-    PickTeamSpawns()
-    local count = 0
-    for _, p in ipairs(players) do
-        if TeleportPlayer(p.char, GetTeam(p.name)) then count=count+1 end
-    end
     Toast("RUNDE " .. PVP.currentRound .. " - FIGHT!")
-    Toast("BLUE " .. PVP.scores.Blue .. " - " .. PVP.scores.Red .. " RED")
+
+    ExecuteWithDelay(2000, function()
+        ExecuteInGameThread(function()
+            -- Frische Referenzen holen NACH dem Respawn
+            Safe(function()
+                local chars = FindAllOf("PlayerCharacter")
+                if chars then for _,c in pairs(chars) do Safe(function() c:ResetHealth() end) end end
+            end)
+            local players = GetAllPlayers()
+            for _, p in ipairs(players) do ApplyTeam(p.char, GetTeam(p.name)) end
+            SetFriendlyFire(true)
+            PickTeamSpawns()
+            local count = 0
+            for _, p in ipairs(players) do
+                if TeleportPlayer(p.char, GetTeam(p.name)) then count=count+1 end
+            end
+            Log("Teleportiert: " .. count .. " Spieler")
+            Toast("BLUE " .. PVP.scores.Blue .. " - " .. PVP.scores.Red .. " RED")
+        end)
+    end)
 end
 
 -- Scoreboard
