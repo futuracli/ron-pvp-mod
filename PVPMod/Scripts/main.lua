@@ -15,6 +15,9 @@ local CONFIG = {
     ROUNDS_TO_WIN = 5,
     TEAM_SPAWN_RADIUS = 250,
     SPAWN_SCATTER_RANGE = 4000,
+    DAMAGE_MULTIPLIER = 1.0,
+    DAMAGE_OPTIONS = { 1.0, 2.0, 5.0, 10.0 },
+    DAMAGE_INDEX = 1,
     DEBUG = true,
 }
 
@@ -361,7 +364,10 @@ end
 
 local function ApplyTeam(playerChar, team)
     local enumVal = (team == "Blue") and 2 or 1
+    -- DefaultTeam Property setzen
     Safe(function() playerChar.DefaultTeam = enumVal end)
+    -- HandleTeamChanged aufrufen damit das Spiel es erkennt
+    Safe(function() playerChar:HandleTeamChanged(enumVal) end)
 end
 
 -- Automatisch Teams zuweisen basierend auf Spieleranzahl
@@ -596,6 +602,29 @@ local function SetupHooks()
         Log("Hook: PlayerKilled")
     end)
 
+    -- Damage Hook fuer Multiplier
+    Safe(function()
+        RegisterHook("/Script/ReadyOrNot.ReadyOrNotCharacter:Multicast_TakeDamage", function(self)
+            if not PVP.enabled then return end
+            if CONFIG.DAMAGE_MULTIPLIER ~= 1.0 then
+                -- Extra Schaden anwenden durch Health-Reduktion
+                Safe(function()
+                    local char = self:get()
+                    if char and char:IsValid() then
+                        local healthComp = nil
+                        Safe(function()
+                            local comps = FindAllOf("CharacterHealthComponent")
+                            if comps then
+                                -- TODO: match component to character
+                            end
+                        end)
+                    end
+                end)
+            end
+        end)
+        Log("Hook: TakeDamage")
+    end)
+
     -- Spawn Hook fuer Friendly Fire
     Safe(function()
         RegisterHook("/Script/ReadyOrNot.ReadyOrNotGameMode:SpawnPlayerCharacter", function(self)
@@ -649,7 +678,18 @@ local function SetupHotkeys()
         Toast("NPCs entfernt!")
     end)
 
-    Log("Hotkeys: F5=GO! F6=Score F7=Stop F8=ClearNPCs")
+    -- F9: Damage Multiplier durchschalten
+    RegisterKeyBind(Key.F9, function()
+        CONFIG.DAMAGE_INDEX = CONFIG.DAMAGE_INDEX + 1
+        if CONFIG.DAMAGE_INDEX > #CONFIG.DAMAGE_OPTIONS then
+            CONFIG.DAMAGE_INDEX = 1
+        end
+        CONFIG.DAMAGE_MULTIPLIER = CONFIG.DAMAGE_OPTIONS[CONFIG.DAMAGE_INDEX]
+        Toast(string.format("Schaden: %.0fx", CONFIG.DAMAGE_MULTIPLIER))
+        Log(string.format("Damage Multiplier: %.0fx", CONFIG.DAMAGE_MULTIPLIER))
+    end)
+
+    Log("Hotkeys: F5=GO! F6=Score F7=Stop F8=NPCs F9=Damage")
 end
 
 ------------------------------------------------------------
@@ -658,8 +698,7 @@ end
 
 math.randomseed(os.time())
 Log("========================================")
-Log("  PVP MOD v4.0 - Ready or Not")
-Log("  EIN KNOPF EDITION")
+Log("  PVP MOD v4.5 - Ready or Not")
 Log("========================================")
 SetupHooks()
 SetupWatcher()
