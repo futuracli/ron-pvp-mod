@@ -188,7 +188,7 @@ end
 local function GetAllPlayers()
     local players = {}
 
-    -- Steam-Namen aus PlayerState holen (PlayerNamePrivate ist ein StrProperty)
+    -- Steam-Namen aus PlayerState holen
     local steamNames = {}
     Safe(function()
         local states = FindAllOf("ReadyOrNotPlayerState")
@@ -196,13 +196,31 @@ local function GetAllPlayers()
             for _, ps in pairs(states) do
                 Safe(function()
                     local n = ""
-                    -- PlayerNamePrivate ist ein StrProperty -> gibt direkt String
+                    -- Methode 1: PlayerNamePrivate (StrProperty)
                     Safe(function()
                         local raw = ps.PlayerNamePrivate
-                        if raw then n = tostring(raw) end
+                        if raw then
+                            n = tostring(raw)
+                            -- FString Objekte filtern
+                            if string.find(n, "FString") or string.find(n, "0x") then
+                                n = ""
+                            end
+                        end
                     end)
+                    -- Methode 2: GetPlayerName Rueckgabe als String lesen
+                    if n == "" or n == "None" then
+                        Safe(function()
+                            local result = ps:GetPlayerName()
+                            if result then
+                                local s = tostring(result)
+                                if s ~= "" and s ~= "None" and not string.find(s, "FString") then
+                                    n = s
+                                end
+                            end
+                        end)
+                    end
                     -- Fallback
-                    if n == "" or n == "None" or string.find(n, "FString") then
+                    if n == "" or n == "None" then
                         n = "Spieler" .. (#steamNames + 1)
                     end
                     table.insert(steamNames, n)
@@ -591,7 +609,21 @@ end
 ------------------------------------------------------------
 
 local function SetupHooks()
-    -- NUR PlayerKilled hooken - das feuert nur fuer echte Spieler, nicht NPCs
+    -- WICHTIGSTER HOOK: IsOnSameTeam ueberschreiben
+    -- Das entfernt "Eigenbeschuss" und macht PVP richtig
+    Safe(function()
+        RegisterHook("/Script/ReadyOrNot.ReadyOrNotCharacter:IsOnSameTeam", function(self, ReturnValue)
+            if not PVP.enabled then return end
+            -- Im PVP sind alle Spieler "nicht im selben Team"
+            -- Damit behandelt das Spiel sie als Gegner
+            if ReturnValue then
+                ReturnValue:set(false)
+            end
+        end)
+        Log("Hook: IsOnSameTeam -> false (KEIN Eigenbeschuss!)")
+    end)
+
+    -- PlayerKilled Hook
     Safe(function()
         RegisterHook("/Script/ReadyOrNot.ReadyOrNotGameMode:PlayerKilled", function(self)
             if not PVP.enabled then return end
@@ -600,29 +632,6 @@ local function SetupHooks()
             CheckRoundEnd()
         end)
         Log("Hook: PlayerKilled")
-    end)
-
-    -- Damage Hook fuer Multiplier
-    Safe(function()
-        RegisterHook("/Script/ReadyOrNot.ReadyOrNotCharacter:Multicast_TakeDamage", function(self)
-            if not PVP.enabled then return end
-            if CONFIG.DAMAGE_MULTIPLIER ~= 1.0 then
-                -- Extra Schaden anwenden durch Health-Reduktion
-                Safe(function()
-                    local char = self:get()
-                    if char and char:IsValid() then
-                        local healthComp = nil
-                        Safe(function()
-                            local comps = FindAllOf("CharacterHealthComponent")
-                            if comps then
-                                -- TODO: match component to character
-                            end
-                        end)
-                    end
-                end)
-            end
-        end)
-        Log("Hook: TakeDamage")
     end)
 
     -- Spawn Hook fuer Friendly Fire
