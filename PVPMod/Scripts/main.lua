@@ -161,9 +161,8 @@ end
 -- Alle Spieler mit Steam-Namen sammeln
 local function GetAllPlayers()
     local players = {}
-    local nameIndex = 1
 
-    -- Erst alle Steam-Namen sammeln
+    -- Steam-Namen aus PlayerState holen (PlayerNamePrivate ist ein StrProperty)
     local steamNames = {}
     Safe(function()
         local states = FindAllOf("ReadyOrNotPlayerState")
@@ -171,27 +170,31 @@ local function GetAllPlayers()
             for _, ps in pairs(states) do
                 Safe(function()
                     local n = ""
-                    Safe(function() n = tostring(ps:GetPlayerName()) end)
-                    if n == "" or n == "None" then
-                        Safe(function() n = tostring(ps.PlayerNamePrivate) end)
+                    -- PlayerNamePrivate ist ein StrProperty -> gibt direkt String
+                    Safe(function()
+                        local raw = ps.PlayerNamePrivate
+                        if raw then n = tostring(raw) end
+                    end)
+                    -- Fallback
+                    if n == "" or n == "None" or string.find(n, "FString") then
+                        n = "Spieler" .. (#steamNames + 1)
                     end
-                    if n ~= "" and n ~= "None" then
-                        table.insert(steamNames, n)
-                    end
+                    table.insert(steamNames, n)
                 end)
             end
         end
     end)
 
-    -- Dann alle Characters sammeln und Namen zuordnen
+    -- Characters sammeln und Namen zuordnen
+    local idx = 1
     Safe(function()
         local chars = FindAllOf("PlayerCharacter")
         if chars then
             for _, char in pairs(chars) do
                 Safe(function()
-                    local name = (steamNames[nameIndex] or ("Spieler " .. nameIndex))
+                    local name = steamNames[idx] or ("Spieler" .. idx)
                     table.insert(players, { name = name, char = char })
-                    nameIndex = nameIndex + 1
+                    idx = idx + 1
                 end)
             end
         end
@@ -453,17 +456,19 @@ local function PVP_GO()
 
     -- RUNDE STARTEN
     PVP.currentRound = PVP.currentRound + 1
-    PVP.roundActive = true
-    Log(">> Schritt 1: Health Reset...")
+    Log(">> Schritt 1: NPCs killen...")
 
-    -- 1) Health reset (nur wenn nicht erste Runde)
+    -- 1) NPCs weg (VOR roundActive damit kills nicht runde beenden)
+    ClearNPCs()
+    Log(">> Schritt 2: Health Reset...")
+
+    -- 2) Health reset (nur wenn nicht erste Runde)
     if PVP.currentRound > 1 then
         RespawnPlayers()
     end
-    Log(">> Schritt 2: NPCs killen...")
 
-    -- 2) NPCs weg
-    ClearNPCs()
+    -- Jetzt erst Runde aktivieren
+    PVP.roundActive = true
     Log(">> Schritt 3: Teams setzen...")
 
     -- 3) Teams setzen
@@ -479,9 +484,17 @@ local function PVP_GO()
 
     -- 5) Neue Spawns waehlen + Teleport
     PickTeamSpawnPoints()
+    if PVP.teamSpawns.Blue then
+        Log(string.format("  BLUE Spawn: %.0f, %.0f", PVP.teamSpawns.Blue.X, PVP.teamSpawns.Blue.Y))
+    end
+    if PVP.teamSpawns.Red then
+        Log(string.format("  RED Spawn: %.0f, %.0f", PVP.teamSpawns.Red.X, PVP.teamSpawns.Red.Y))
+    end
     local count = 0
     for _, p in ipairs(players) do
-        if TeleportPlayer(p.char, GetTeam(p.name)) then count = count + 1 end
+        local team = GetTeam(p.name)
+        Log(string.format("  TP: %s [%s]", p.name, team))
+        if TeleportPlayer(p.char, team) then count = count + 1 end
     end
 
     Log(">> Runde gestartet!")
@@ -536,47 +549,25 @@ end
 ------------------------------------------------------------
 
 local function SetupHooks()
-    local hooks = {
-        { "/Script/ReadyOrNot.ReadyOrNotGameMode:PlayerKilled", "PlayerKilled" },
-        { "/Script/ReadyOrNot.ReadyOrNotCharacter:OnKilled", "OnKilled" },
-        { "/Script/ReadyOrNot.ReadyOrNotCharacter:Multicast_OnKilled", "MC_OnKilled" },
-        { "/Script/ReadyOrNot.ReadyOrNotCharacter:Server_Kill", "Server_Kill" },
-        { "/Script/ReadyOrNot.ReadyOrNotGameMode:SpawnPlayerCharacter", "SpawnChar" },
-    }
-
-    for _, h in ipairs(hooks) do
-        Safe(function()
-            RegisterHook(h[1], function(self)
-                if not PVP.enabled then return end
-                if h[2] == "OnKilled" then
-                    -- Kill-Nachricht mit Steam-Name
-                    local name = "?"
-                    pcall(function()
-                        local obj = self:get()
-                        -- Versuche Steam-Name zu finden
-                        local states = FindAllOf("ReadyOrNotPlayerState")
-                        if states then
-                            for _, ps in pairs(states) do
-                                pcall(function()
-                                    local n = tostring(ps:GetPlayerName())
-                                    if n and n ~= "" and n ~= "None" then
-                                        name = n
-                                    end
-                                end)
-                            end
-                        end
-                    end)
-                    Toast(name .. " eliminiert!")
-                    CheckRoundEnd()
-                elseif h[2] == "SpawnChar" then
-                    SetFriendlyFire(true)
-                else
-                    CheckRoundEnd()
-                end
-            end)
-            Log("Hook: " .. h[2])
+    -- NUR PlayerKilled hooken - das feuert nur fuer echte Spieler, nicht NPCs
+    Safe(function()
+        RegisterHook("/Script/ReadyOrNot.ReadyOrNotGameMode:PlayerKilled", function(self)
+            if not PVP.enabled then return end
+            Log(">> Spieler getoetet!")
+            Toast("Spieler eliminiert!")
+            CheckRoundEnd()
         end)
-    end
+        Log("Hook: PlayerKilled")
+    end)
+
+    -- Spawn Hook fuer Friendly Fire
+    Safe(function()
+        RegisterHook("/Script/ReadyOrNot.ReadyOrNotGameMode:SpawnPlayerCharacter", function(self)
+            if not PVP.enabled then return end
+            SetFriendlyFire(true)
+        end)
+        Log("Hook: SpawnChar")
+    end)
 end
 
 ------------------------------------------------------------
