@@ -623,6 +623,24 @@ local function SetupHooks()
         Log("Hook: IsOnSameTeam -> false (KEIN Eigenbeschuss!)")
     end)
 
+    -- IsFriendly Hook - zweite Ebene der Team-Erkennung
+    Safe(function()
+        RegisterHook("/Script/ReadyOrNot.BpGameplayHelperLib:IsFriendly", function(self, ReturnValue)
+            if not PVP.enabled then return end
+            if ReturnValue then ReturnValue:set(false) end
+        end)
+        Log("Hook: IsFriendly -> false")
+    end)
+
+    -- IsFriendlyWithMe Hook - dritte Ebene
+    Safe(function()
+        RegisterHook("/Script/ReadyOrNot.BpGameplayHelperLib:IsFriendlyWithMe", function(self, ReturnValue)
+            if not PVP.enabled then return end
+            if ReturnValue then ReturnValue:set(false) end
+        end)
+        Log("Hook: IsFriendlyWithMe -> false")
+    end)
+
     -- PlayerKilled Hook
     Safe(function()
         RegisterHook("/Script/ReadyOrNot.ReadyOrNotGameMode:PlayerKilled", function(self)
