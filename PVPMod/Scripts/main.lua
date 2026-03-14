@@ -302,8 +302,7 @@ local function ClearNPCs()
             if npcs then
                 for _, npc in pairs(npcs) do
                     Safe(function()
-                        pcall(function() npc:Kill() end)
-                        pcall(function() npc:K2_DestroyActor() end)
+                        npc:Kill()
                         removed = removed + 1
                     end)
                 end
@@ -368,13 +367,7 @@ end
 ------------------------------------------------------------
 
 local function RespawnPlayers()
-    Safe(function()
-        local gm = FindFirstOf("ReadyOrNotGameMode")
-        if gm and gm:IsValid() then
-            Safe(function() gm:RespawnDeadPlayers() end)
-            Safe(function() gm:RespawnAllPlayers() end)
-        end
-    end)
+    -- Nur Health resetten, kein RespawnAllPlayers (friert das Spiel ein)
     Safe(function()
         local chars = FindAllOf("PlayerCharacter")
         if chars then
@@ -383,6 +376,7 @@ local function RespawnPlayers()
             end
         end
     end)
+    Debug("Health reset")
 end
 
 ------------------------------------------------------------
@@ -460,22 +454,28 @@ local function PVP_GO()
     -- RUNDE STARTEN
     PVP.currentRound = PVP.currentRound + 1
     PVP.roundActive = true
+    Log(">> Schritt 1: Health Reset...")
 
-    -- 1) Respawn
-    RespawnPlayers()
+    -- 1) Health reset (nur wenn nicht erste Runde)
+    if PVP.currentRound > 1 then
+        RespawnPlayers()
+    end
+    Log(">> Schritt 2: NPCs killen...")
 
     -- 2) NPCs weg
     ClearNPCs()
+    Log(">> Schritt 3: Teams setzen...")
 
     -- 3) Teams setzen
     local players = GetAllPlayers()
     for _, p in ipairs(players) do
-        local team = GetTeam(p.name)
-        ApplyTeam(p.char, team)
+        ApplyTeam(p.char, GetTeam(p.name))
     end
+    Log(">> Schritt 4: Friendly Fire...")
 
     -- 4) Friendly Fire
     SetFriendlyFire(true)
+    Log(">> Schritt 5: Teleport...")
 
     -- 5) Neue Spawns waehlen + Teleport
     PickTeamSpawnPoints()
@@ -484,9 +484,9 @@ local function PVP_GO()
         if TeleportPlayer(p.char, GetTeam(p.name)) then count = count + 1 end
     end
 
+    Log(">> Runde gestartet!")
     Toast(string.format("RUNDE %d - FIGHT!", PVP.currentRound))
     ScorePopup(string.format("BLUE %d - %d RED", PVP.scores.Blue, PVP.scores.Red))
-    Log(string.format("Runde %d | %d Spieler teleportiert", PVP.currentRound, count))
 end
 
 ------------------------------------------------------------
