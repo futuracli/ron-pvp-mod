@@ -809,7 +809,7 @@ end
 
 local function SetupHotkeys()
     -- INSERT: In-Game Menu (Widget + Toast Fallback)
-    RegisterKeyBind(Key.INSERT, function()
+    RegisterKeyBind(Key.INS, function()
         MENU.open = not MENU.open
         if MENU.open then
             MENU.page = "main"
