@@ -622,29 +622,139 @@ local function SetupWatcher()
 end
 
 ------------------------------------------------------------
+-- IN-GAME MENU (Insert Taste)
+-- Zeigt Optionen als Toast, Numpad waehlt aus
+------------------------------------------------------------
+
+local MENU = {
+    open = false,
+    page = "main",
+}
+
+local function ShowMenuPage()
+    if MENU.page == "main" then
+        Toast("=== PVP MENU ===")
+        Toast(string.format("Status: %s | Runde %d/%d | B%d-R%d",
+            PVP.enabled and "AN" or "AUS", PVP.currentRound, CONFIG.ROUNDS_TO_WIN,
+            PVP.scores.Blue, PVP.scores.Red))
+        Toast("[1] PVP Start/Runde [2] Stop")
+        Toast("[3] Teams [4] Runden [5] Schaden")
+        Toast("[6] NPCs weg [7] Scoreboard")
+        Toast("[Insert] Menu schliessen")
+    elseif MENU.page == "teams" then
+        Toast("=== TEAMS ===")
+        local players = GetAllPlayers()
+        for i, p in ipairs(players) do
+            Toast(string.format("%d. %s -> %s", i, p.name, GetTeam(p.name)))
+        end
+        Toast("[1] Auto-Teams [2] Tauschen")
+        Toast("[3] Sp1 wechseln [4] Sp2 wechseln")
+        Toast("[9] Zurueck")
+    elseif MENU.page == "rounds" then
+        Toast(string.format("=== RUNDEN: %d ===", CONFIG.ROUNDS_TO_WIN))
+        Toast("[1] 3 Runden [2] 5 Runden [3] 7 Runden")
+        Toast("[9] Zurueck")
+    elseif MENU.page == "damage" then
+        Toast(string.format("=== SCHADEN: %.0fx ===", CONFIG.DAMAGE_MULTIPLIER))
+        Toast("[1] 1x [2] 2x [3] 5x [4] 10x")
+        Toast("[9] Zurueck")
+    end
+end
+
+local function HandleMenuInput(key)
+    if not MENU.open then return false end
+
+    if MENU.page == "main" then
+        if key == 1 then PVP_GO(); MENU.open = false
+        elseif key == 2 then
+            PVP.enabled = false; PVP.roundActive = false
+            SetFriendlyFire(false); Toast("PVP GESTOPPT"); MENU.open = false
+        elseif key == 3 then MENU.page = "teams"; ShowMenuPage()
+        elseif key == 4 then MENU.page = "rounds"; ShowMenuPage()
+        elseif key == 5 then MENU.page = "damage"; ShowMenuPage()
+        elseif key == 6 then ClearNPCs(); Toast("NPCs entfernt!")
+        elseif key == 7 then ShowScoreboard()
+        end
+    elseif MENU.page == "teams" then
+        if key == 1 then AutoAssignTeams(); ShowMenuPage()
+        elseif key == 2 then
+            for name, team in pairs(PVP.teams) do
+                PVP.teams[name] = (team == "Blue") and "Red" or "Blue"
+            end
+            Toast("Teams getauscht!")
+            ShowMenuPage()
+        elseif key == 3 then
+            local players = GetAllPlayers()
+            if #players >= 1 then
+                local p = players[1]
+                PVP.teams[p.name] = (GetTeam(p.name) == "Blue") and "Red" or "Blue"
+                ApplyTeam(p.char, PVP.teams[p.name])
+                Toast(p.name .. " -> " .. PVP.teams[p.name])
+            end
+            ShowMenuPage()
+        elseif key == 4 then
+            local players = GetAllPlayers()
+            if #players >= 2 then
+                local p = players[2]
+                PVP.teams[p.name] = (GetTeam(p.name) == "Blue") and "Red" or "Blue"
+                ApplyTeam(p.char, PVP.teams[p.name])
+                Toast(p.name .. " -> " .. PVP.teams[p.name])
+            end
+            ShowMenuPage()
+        elseif key == 9 then MENU.page = "main"; ShowMenuPage()
+        end
+    elseif MENU.page == "rounds" then
+        if key == 1 then CONFIG.ROUNDS_TO_WIN = 3; Toast("Runden: 3")
+        elseif key == 2 then CONFIG.ROUNDS_TO_WIN = 5; Toast("Runden: 5")
+        elseif key == 3 then CONFIG.ROUNDS_TO_WIN = 7; Toast("Runden: 7")
+        elseif key == 9 then MENU.page = "main"; ShowMenuPage()
+        end
+    elseif MENU.page == "damage" then
+        if key == 1 then CONFIG.DAMAGE_MULTIPLIER = 1.0; Toast("Schaden: 1x")
+        elseif key == 2 then CONFIG.DAMAGE_MULTIPLIER = 2.0; Toast("Schaden: 2x")
+        elseif key == 3 then CONFIG.DAMAGE_MULTIPLIER = 5.0; Toast("Schaden: 5x")
+        elseif key == 4 then CONFIG.DAMAGE_MULTIPLIER = 10.0; Toast("Schaden: 10x")
+        elseif key == 9 then MENU.page = "main"; ShowMenuPage()
+        end
+    end
+
+    return true
+end
+
+------------------------------------------------------------
 -- HOTKEYS
 ------------------------------------------------------------
 
 local function SetupHotkeys()
+    -- INSERT: In-Game Menu
+    RegisterKeyBind(Key.INSERT, function()
+        MENU.open = not MENU.open
+        if MENU.open then
+            MENU.page = "main"
+            ShowMenuPage()
+        else
+            Toast("Menu geschlossen")
+        end
+    end)
+
+    -- F5: Quick Start (auch ohne Menu)
     RegisterKeyBind(Key.F5, function() PVP_GO() end)
+
+    -- F6: Scoreboard
     RegisterKeyBind(Key.F6, function() ShowScoreboard() end)
-    RegisterKeyBind(Key.F7, function()
-        PVP.enabled = false
-        PVP.roundActive = false
-        SetFriendlyFire(false)
-        Toast("PVP GESTOPPT")
-    end)
-    RegisterKeyBind(Key.F8, function()
-        ClearNPCs()
-        Toast("NPCs entfernt!")
-    end)
-    RegisterKeyBind(Key.F9, function()
-        CONFIG.DAMAGE_INDEX = CONFIG.DAMAGE_INDEX + 1
-        if CONFIG.DAMAGE_INDEX > #CONFIG.DAMAGE_OPTIONS then CONFIG.DAMAGE_INDEX = 1 end
-        CONFIG.DAMAGE_MULTIPLIER = CONFIG.DAMAGE_OPTIONS[CONFIG.DAMAGE_INDEX]
-        Toast(string.format("Schaden: %.0fx", CONFIG.DAMAGE_MULTIPLIER))
-    end)
-    Log("Hotkeys: F5=GO F6=Score F7=Stop F8=NPCs F9=DMG")
+
+    -- Numpad 1-9: Menu Input
+    RegisterKeyBind(Key.NUM_ONE, function() HandleMenuInput(1) end)
+    RegisterKeyBind(Key.NUM_TWO, function() HandleMenuInput(2) end)
+    RegisterKeyBind(Key.NUM_THREE, function() HandleMenuInput(3) end)
+    RegisterKeyBind(Key.NUM_FOUR, function() HandleMenuInput(4) end)
+    RegisterKeyBind(Key.NUM_FIVE, function() HandleMenuInput(5) end)
+    RegisterKeyBind(Key.NUM_SIX, function() HandleMenuInput(6) end)
+    RegisterKeyBind(Key.NUM_SEVEN, function() HandleMenuInput(7) end)
+    RegisterKeyBind(Key.NUM_EIGHT, function() HandleMenuInput(8) end)
+    RegisterKeyBind(Key.NUM_NINE, function() HandleMenuInput(9) end)
+
+    Log("Hotkeys: INSERT=Menu F5=GO F6=Score Numpad=Input")
 end
 
 ------------------------------------------------------------
@@ -653,13 +763,14 @@ end
 
 math.randomseed(os.time())
 Log("========================================")
-Log("  PVP MOD v5.0 - Ready or Not")
+Log("  PVP MOD v5.1 - Ready or Not")
 Log("========================================")
 SetupHooks()
 SetupWatcher()
 SetupHotkeys()
 Log("========================================")
-Log("  F5 = PVP / Naechste Runde")
+Log("  INSERT = In-Game PVP Menu")
+Log("  F5 = Quick Start / Naechste Runde")
 Log("  F6 = Scoreboard")
-Log("  F7 = Stoppen | F8 = NPCs | F9 = DMG")
+Log("  Numpad 1-9 = Menu Auswahl")
 Log("========================================")
