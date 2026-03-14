@@ -58,15 +58,14 @@ end
 -- TOAST - In-Game Nachrichten ueber das Spiel-HUD
 ------------------------------------------------------------
 
--- Findet das aktive HUD Widget (Blueprint-Klasse)
-local function FindHUD()
-    local hud = nil
-    -- Versuche Blueprint-Klasse zuerst, dann C++ Klasse
-    pcall(function() hud = FindFirstOf("W_HumanCharacter_HUD_V2_C") end)
-    if not hud then
-        pcall(function() hud = FindFirstOf("HumanCharacterHUD_V2") end)
+-- Findet ALLE aktiven HUD Widgets (fuer alle Spieler)
+local function FindAllHUDs()
+    local huds = nil
+    pcall(function() huds = FindAllOf("W_HumanCharacter_HUD_V2_C") end)
+    if not huds then
+        pcall(function() huds = FindAllOf("HumanCharacterHUD_V2") end)
     end
-    return hud
+    return huds
 end
 
 local function Toast(msg)
@@ -75,12 +74,16 @@ local function Toast(msg)
     pcall(function()
         ExecuteInGameThread(function()
             pcall(function()
-                local hud = FindHUD()
-                if hud and hud:IsValid() then
-                    hud:AddToast(text)
-                    Debug("Toast gesendet: " .. text)
-                else
-                    Debug("HUD nicht gefunden fuer Toast")
+                local huds = FindAllHUDs()
+                if huds then
+                    for _, hud in pairs(huds) do
+                        pcall(function()
+                            if hud:IsValid() then
+                                hud:AddToast(text)
+                            end
+                        end)
+                    end
+                    Debug("Toast an alle gesendet")
                 end
             end)
         end)
@@ -91,9 +94,15 @@ local function ScorePopup(msg)
     pcall(function()
         ExecuteInGameThread(function()
             pcall(function()
-                local hud = FindHUD()
-                if hud and hud:IsValid() then
-                    hud:AddScorePopup(FText(tostring(msg)))
+                local huds = FindAllHUDs()
+                if huds then
+                    for _, hud in pairs(huds) do
+                        pcall(function()
+                            if hud:IsValid() then
+                                hud:AddScorePopup(FText(tostring(msg)))
+                            end
+                        end)
+                    end
                 end
             end)
         end)
@@ -418,21 +427,33 @@ local function CheckRoundEnd()
         end
     end
 
-    if aliveBlue == 0 and aliveRed > 0 then
+    local winner = nil
+    if aliveBlue == 0 and aliveRed > 0 then winner = "Red"
+    elseif aliveRed == 0 and aliveBlue > 0 then winner = "Blue" end
+
+    if winner then
         PVP.roundActive = false
-        PVP.scores.Red = PVP.scores.Red + 1
-        Toast(string.format("TEAM RED GEWINNT RUNDE %d!", PVP.currentRound))
+        PVP.scores[winner] = PVP.scores[winner] + 1
+        Toast(string.format("TEAM %s GEWINNT RUNDE %d!", string.upper(winner), PVP.currentRound))
         ScorePopup(string.format("BLUE %d - %d RED", PVP.scores.Blue, PVP.scores.Red))
-        if PVP.scores.Red >= CONFIG.ROUNDS_TO_WIN then
-            Toast("TEAM RED GEWINNT DAS MATCH!")
-        end
-    elseif aliveRed == 0 and aliveBlue > 0 then
-        PVP.roundActive = false
-        PVP.scores.Blue = PVP.scores.Blue + 1
-        Toast(string.format("TEAM BLUE GEWINNT RUNDE %d!", PVP.currentRound))
-        ScorePopup(string.format("BLUE %d - %d RED", PVP.scores.Blue, PVP.scores.Red))
-        if PVP.scores.Blue >= CONFIG.ROUNDS_TO_WIN then
-            Toast("TEAM BLUE GEWINNT DAS MATCH!")
+
+        if PVP.scores[winner] >= CONFIG.ROUNDS_TO_WIN then
+            Toast(string.format("TEAM %s GEWINNT DAS MATCH!", string.upper(winner)))
+            -- Match reset nach 8 Sekunden
+            ExecuteWithDelay(8000, function()
+                PVP.scores = { Blue = 0, Red = 0 }
+                PVP.currentRound = 0
+                Toast("Neues Match! Naechste Runde in 5 Sek...")
+                ExecuteWithDelay(5000, function()
+                    PVP_GO()
+                end)
+            end)
+        else
+            -- Naechste Runde automatisch nach 5 Sekunden
+            Toast("Naechste Runde in 5 Sekunden...")
+            ExecuteWithDelay(5000, function()
+                PVP_GO()
+            end)
         end
     end
 end
